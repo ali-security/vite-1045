@@ -14,7 +14,6 @@ import {
   prettifyUrl,
   removeImportQuery,
   removeTimestampQuery,
-  urlRE,
 } from '../../utils'
 import { send } from '../send'
 import { ERR_LOAD_URL, transformRequest } from '../transformRequest'
@@ -35,10 +34,17 @@ import { ERR_CLOSED_SERVER } from '../pluginContainer'
 import { getDepsOptimizer } from '../../optimizer'
 import { cleanUrl, unwrapId, withTrailingSlash } from '../../../shared/utils'
 import { NULL_BYTE_PLACEHOLDER } from '../../../shared/constants'
+import { ensureServingAccess } from './static'
 
 const debugCache = createDebugger('vite:cache')
 
 const knownIgnoreList = new Set(['/', '/favicon.ico'])
+const trailingQuerySeparatorsRE = /[?&]+$/
+
+// TODO: consolidate this regex pattern with the url, raw, and inline checks in plugins
+const urlRE = /[?&]url\b/
+const rawRE = /[?&]raw\b/
+const inlineRE = /[?&]inline\b/
 
 /**
  * A middleware that short-circuits the middleware chain to serve cached transformed modules
@@ -156,6 +162,24 @@ export function transformMiddleware(
 
       if (publicDirInRoot && url.startsWith(publicPath)) {
         warnAboutExplicitPublicPathInUrl(url)
+      }
+
+      const urlWithoutTrailingQuerySeparators = url.replace(
+        trailingQuerySeparatorsRE,
+        '',
+      )
+      if (
+        (rawRE.test(urlWithoutTrailingQuerySeparators) ||
+          urlRE.test(urlWithoutTrailingQuerySeparators) ||
+          inlineRE.test(urlWithoutTrailingQuerySeparators)) &&
+        !ensureServingAccess(
+          urlWithoutTrailingQuerySeparators,
+          server,
+          res,
+          next,
+        )
+      ) {
+        return
       }
 
       if (
